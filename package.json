@@ -1,0 +1,10 @@
+{
+  "name": "dtp-wa-channel",
+  "version": "0.1.0",
+  "description": "Datipay WhatsApp channel service - zero-dependency webhook receiver and sender (DTP-WA-001)",
+  "main": "src/index.js",
+  "scripts": { "start": "node src/index.js" },
+  "engines": { "node": ">=22" },
+  "license": "UNLICENSED",
+  "private": true
+}

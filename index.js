@@ -1,6 +1,6 @@
 
 /**
- * dtp-wa-channel v0.2 — Datipay WhatsApp channel (DEMO conversation mode)
+ * dtp-wa-channel v0.3 — Datipay WhatsApp channel (interactive DEMO: buttons, lists, rubriques)
  * -----------------------------------------------------------------------
  * Zero-dependency Node.js (>=22). Entry point at repo root: `node index.js`.
  *
@@ -64,13 +64,23 @@ const fmtXAF = (n) => Number(n).toLocaleString("fr-FR").replace(/\u202f|\u00a0/g
 const RAILS = { fr: ["MTN MoMo", "Orange Money", "Espèces (trésorier)", "Caisse populaire"], en: ["MTN MoMo", "Orange Money", "Cash (treasurer)", "Credit union"] };
 const T = {
   fr: {
-    menu: "Bienvenue chez Datipay 👋\n*Le carnet du trésorier, infaillible.*\n\n🔎 _Ceci est une DÉMO — groupe fictif « Njangi Unité Bamenda », cycle 4._\n\nRépondez avec un chiffre :\n1️⃣ Déclarer une cotisation\n2️⃣ Rapport du groupe\n3️⃣ Mon solde\n4️⃣ Aide · English\n\n_Répondez STOP pour ne plus recevoir de messages._",
+    menuBody: "Bienvenue chez Datipay 👋\n*Le carnet du trésorier, infaillible.*\n\n🔎 _DÉMO — groupe fictif « Njangi Unité Bamenda », cycle 4._",
+    menuFooter: "STOP pour ne plus recevoir de messages",
+    bCotiser: "✅ Cotiser", bRapport: "📊 Rapport", bPlus: "☰ Plus",
+    moreTitle: "Autres options", moreBtn: "Choisir",
+    moreRows: [["m_balance","👤 Mon solde","Votre situation dans le groupe"],["m_help","ℹ️ Aide","Commandes et informations"],["m_lang","🌐 English","Switch to English"]],
+    rubBody: "Pour quelle rubrique ?", rubBtn: "Choisir la rubrique",
+    rubRows: [["rub_cot","Cotisation principale","Cycle 4 · 25 000 XAF attendus"],["rub_sol","Solidarité","Deuil · naissance · mariage"],["rub_amende","Amende","Régler une pénalité"],["rub_epargne","Épargne libre","Dépôt volontaire"]],
+    amtBody: (rub) => `${rub} — quel montant ?`,
+    bAmtExpected: "25 000 (attendu)", bAmtOther: "Autre montant",
+    railBody: (amt) => `${fmtXAF(amt)} — par quelle voie ?`, railBtn: "Choisir la voie",
+    railRows: [["rail_1","MTN MoMo",""],["rail_2","Orange Money",""],["rail_3","Espèces","Remis au trésorier"],["rail_4","Caisse populaire","Bordereau de dépôt"]],
     askAmount: "Quel montant avez-vous payé ?\n_(exemple : 25000)_",
     badAmount: "Je n'ai pas compris le montant. Envoyez seulement les chiffres, ex : *25000*",
     askRail: (amt) => `${fmtXAF(amt)} — par quelle voie ?\n\n1️⃣ MTN MoMo\n2️⃣ Orange Money\n3️⃣ Espèces (au trésorier)\n4️⃣ Caisse populaire`,
     badRail: "Répondez 1, 2, 3 ou 4 pour choisir la voie de paiement.",
-    receipt: (amt, rail, ref) =>
-      `✅ *Vérifié et enregistré — merci !*\n━━━━━━━━━━━━━━━\n*DATIPAY REÇU* _(DÉMO)_\n\n*${fmtXAF(amt)}*\n\nMembre : DTP-MBR-2026-0012\nVoie : ${rail}\nRéf : ${ref}\nCycle 4 · 13/18 payés\n\n*CONFIRMÉ* ✔\n━━━━━━━━━━━━━━━\n_Reçu partagé avec le bureau. Répondez MENU pour continuer._`,
+    receipt: (amt, rub, rail, ref) =>
+      `✅ *Vérifié et enregistré — merci !*\n━━━━━━━━━━━━━━━\n*DATIPAY REÇU* _(DÉMO)_\n\n*${fmtXAF(amt)}*\n\nMembre : DTP-MBR-2026-0012\nRubrique : ${rub}\nVoie : ${rail}\nRéf : ${ref}\nCycle 4 · 13/18 payés\n\n*CONFIRMÉ* ✔\n━━━━━━━━━━━━━━━\n_Reçu partagé avec le bureau. Répondez MENU pour continuer._`,
     report: "📊 *Rapport — Njangi « Unité Bamenda »* _(DÉMO)_\nCycle 4 · bénéficiaire : Membre 07\n\nCotisations : *13/18 payées*\nCaisse du cycle : *325 000 XAF*\nAmendes en attente : 2 (4 000 XAF)\nCollecte solidarité (deuil) : 86 000 XAF\n\nEn retard : M-03, M-09, M-11, M-14, M-16\n_Rappels envoyés automatiquement hier à 18h._\n\nRépondez MENU pour continuer.",
     balance: "👤 *Votre situation* _(DÉMO)_\nMembre : DTP-MBR-2026-0012\n\nCycle 4 : *payé* ✔ (25 000 XAF)\nAmendes : aucune\nSolidarité versée : 5 000 XAF\nVotre tour de ramassage : cycle 7\n\nRépondez MENU pour continuer.",
     help: "ℹ️ *Aide Datipay*\nDatipay tient le registre de votre groupe sur WhatsApp : reçus numérotés, rappels, rapports.\nDatipay n'est pas une banque et ne détient pas votre argent.\n\nCommandes : *MENU* · *1* cotisation · *2* rapport · *3* solde · *STOP*\nFor English, reply *EN*.",
@@ -79,13 +89,23 @@ const T = {
     fallback: "Je n'ai pas compris 🤔 Répondez *MENU* pour voir les options.",
   },
   en: {
-    menu: "Welcome to Datipay 👋\n*The treasurer's notebook, made unforgettable.*\n\n🔎 _This is a DEMO — fictional group \"Njangi Unité Bamenda\", cycle 4._\n\nReply with a number:\n1️⃣ Declare a contribution\n2️⃣ Group report\n3️⃣ My balance\n4️⃣ Help · Français\n\n_Reply STOP to opt out._",
+    menuBody: "Welcome to Datipay 👋\n*The treasurer's notebook, made unforgettable.*\n\n🔎 _DEMO — fictional group \"Njangi Unité Bamenda\", cycle 4._",
+    menuFooter: "Reply STOP to opt out",
+    bCotiser: "✅ Contribute", bRapport: "📊 Report", bPlus: "☰ More",
+    moreTitle: "More options", moreBtn: "Choose",
+    moreRows: [["m_balance","👤 My balance","Your standing in the group"],["m_help","ℹ️ Help","Commands and info"],["m_lang","🌐 Français","Passer en français"]],
+    rubBody: "Which category?", rubBtn: "Choose category",
+    rubRows: [["rub_cot","Main contribution","Cycle 4 · 25,000 XAF expected"],["rub_sol","Solidarity","Bereavement · birth · wedding"],["rub_amende","Fine","Settle a penalty"],["rub_epargne","Free savings","Voluntary deposit"]],
+    amtBody: (rub) => `${rub} — how much?`,
+    bAmtExpected: "25,000 (expected)", bAmtOther: "Other amount",
+    railBody: (amt) => `${fmtXAF(amt)} — through which rail?`, railBtn: "Choose rail",
+    railRows: [["rail_1","MTN MoMo",""],["rail_2","Orange Money",""],["rail_3","Cash","Handed to treasurer"],["rail_4","Credit union","Deposit slip"]],
     askAmount: "How much did you pay?\n_(example: 25000)_",
     badAmount: "I didn't catch the amount. Send digits only, e.g. *25000*",
     askRail: (amt) => `${fmtXAF(amt)} — through which rail?\n\n1️⃣ MTN MoMo\n2️⃣ Orange Money\n3️⃣ Cash (to treasurer)\n4️⃣ Credit union`,
     badRail: "Reply 1, 2, 3 or 4 to choose the payment rail.",
-    receipt: (amt, rail, ref) =>
-      `✅ *Verified and recorded — thank you!*\n━━━━━━━━━━━━━━━\n*DATIPAY RECEIPT* _(DEMO)_\n\n*${fmtXAF(amt)}*\n\nMember: DTP-MBR-2026-0012\nRail: ${rail}\nRef: ${ref}\nCycle 4 · 13/18 paid\n\n*CONFIRMED* ✔\n━━━━━━━━━━━━━━━\n_Receipt shared with the bureau. Reply MENU to continue._`,
+    receipt: (amt, rub, rail, ref) =>
+      `✅ *Verified and recorded — thank you!*\n━━━━━━━━━━━━━━━\n*DATIPAY RECEIPT* _(DEMO)_\n\n*${fmtXAF(amt)}*\n\nMember: DTP-MBR-2026-0012\nCategory: ${rub}\nRail: ${rail}\nRef: ${ref}\nCycle 4 · 13/18 paid\n\n*CONFIRMED* ✔\n━━━━━━━━━━━━━━━\n_Receipt shared with the bureau. Reply MENU to continue._`,
     report: "📊 *Report — Njangi \"Unité Bamenda\"* _(DEMO)_\nCycle 4 · beneficiary: Member 07\n\nContributions: *13/18 paid*\nCycle pot: *325,000 XAF*\nPending fines: 2 (4,000 XAF)\nSolidarity collection (bereavement): 86,000 XAF\n\nLate: M-03, M-09, M-11, M-14, M-16\n_Reminders sent automatically yesterday 6pm._\n\nReply MENU to continue.",
     balance: "👤 *Your standing* _(DEMO)_\nMember: DTP-MBR-2026-0012\n\nCycle 4: *paid* ✔ (25,000 XAF)\nFines: none\nSolidarity given: 5,000 XAF\nYour payout turn: cycle 7\n\nReply MENU to continue.",
     help: "ℹ️ *Datipay help*\nDatipay keeps your group's record on WhatsApp: numbered receipts, reminders, reports.\nDatipay is not a bank and does not hold your money.\n\nCommands: *MENU* · *1* contribute · *2* report · *3* balance · *STOP*\nPour le français, répondez *FR*.",
@@ -106,55 +126,110 @@ function detectLang(text, s) {
 }
 
 function reply(from, s, text) { return sendText(from, text).catch((e) => log("error", "send failed", { err: String(e) })); }
+function replyI(from, s, payload) { return sendInteractive(from, payload).catch((e) => log("error", "send failed", { err: String(e) })); }
+const RUB = { rub_cot: { fr: "Cotisation principale", en: "Main contribution" }, rub_sol: { fr: "Solidarité", en: "Solidarity" }, rub_amende: { fr: "Amende", en: "Fine" }, rub_epargne: { fr: "Épargne libre", en: "Free savings" } };
+
+function sendMenu(from, s) {
+  const t = T[s.lang];
+  return replyI(from, s, btns(t.menuBody, [["act_cotiser", t.bCotiser], ["act_rapport", t.bRapport], ["act_more", t.bPlus]], t.menuFooter));
+}
+
+async function handleAction(from, s, id) {
+  const t = T[s.lang];
+  switch (true) {
+    case id === "act_cotiser":
+      s.step = "await_rub";
+      return replyI(from, s, list(t.rubBody, t.rubBtn, t.rubRows));
+    case id === "act_rapport": s.step = "idle"; return reply(from, s, t.report);
+    case id === "act_more":
+      return replyI(from, s, list(t.moreTitle, t.moreBtn, t.moreRows));
+    case id === "m_balance": s.step = "idle"; return reply(from, s, t.balance);
+    case id === "m_help": s.step = "idle"; return reply(from, s, t.help);
+    case id === "m_lang": s.lang = s.lang === "fr" ? "en" : "fr"; s.step = "idle"; return sendMenu(from, s);
+    case id.startsWith("rub_"): {
+      s.data.rub = RUB[id][s.lang]; s.step = "await_amount";
+      return replyI(from, s, btns(T[s.lang].amtBody(s.data.rub), [["amt_expected", T[s.lang].bAmtExpected], ["amt_other", T[s.lang].bAmtOther]]));
+    }
+    case id === "amt_expected": s.data.amount = 25000; s.step = "await_rail";
+      return replyI(from, s, list(t.railBody(25000), t.railBtn, t.railRows));
+    case id === "amt_other": s.step = "await_amount_text"; return reply(from, s, t.askAmount);
+    case id.startsWith("rail_"): {
+      if (!s.data.amount) { s.step = "idle"; return sendMenu(from, s); }
+      const rail = RAILS[s.lang][Number(id.split("_")[1]) - 1];
+      const ref = `DTP-RCT-2026-${String(rctSeq++).padStart(6, "0")} (DEMO)`;
+      const amt = s.data.amount; const rub = s.data.rub || RUB.rub_cot[s.lang];
+      s.step = "idle"; s.data = {};
+      log("info", "demo receipt issued", { from, amt, rub, rail, ref });
+      return reply(from, s, t.receipt(amt, rub, rail, ref));
+    }
+    default: return sendMenu(from, s);
+  }
+}
 
 async function handleMessage(msg, contactName) {
   const from = msg.from;
   const s = session(from);
+  // interactive replies (button/list taps)
+  if (msg.type === "interactive") {
+    const id = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id;
+    log("info", "inbound tap", { from, name: contactName, id, step: s.step });
+    if (!id) return;
+    if (s.optOut) return;
+    return handleAction(from, s, id);
+  }
   if (msg.type !== "text") {
     log("info", "inbound non-text", { from, type: msg.type });
-    return reply(from, s, s.lang === "fr" ? "Pour la démo, envoyez un message texte 🙂 (*MENU*)" : "For the demo, please send a text message 🙂 (*MENU*)");
+    return reply(from, s, s.lang === "fr" ? "Pour la démo, envoyez un message texte 🙂" : "For the demo, please send a text message 🙂");
   }
   const raw = (msg.text?.body ?? "").trim();
   const text = raw.toLowerCase();
   log("info", "inbound text", { from, name: contactName, text: raw, step: s.step });
 
-  // language + opt-out first
   s.lang = detectLang(raw, s);
   const t = T[s.lang];
   if (/^stop$/i.test(text)) { s.optOut = true; s.step = "idle"; return reply(from, s, t.stopped); }
   if (s.optOut) {
-    if (/^start$/i.test(text)) { s.optOut = false; s.step = "idle"; await reply(from, s, t.resumed); return reply(from, s, t.menu); }
-    return; // honor opt-out silently
+    if (/^start$/i.test(text)) { s.optOut = false; s.step = "idle"; await reply(from, s, t.resumed); return sendMenu(from, s); }
+    return;
   }
-  if (/^(en|english|fr|français|francais)$/i.test(text)) { s.step = "idle"; return reply(from, s, T[s.lang].menu); }
+  if (/^(en|english|fr|français|francais)$/i.test(text)) { s.step = "idle"; return sendMenu(from, s); }
 
-  // state machine
-  if (s.step === "await_amount") {
+  if (s.step === "await_amount_text" || s.step === "await_amount") {
     const amt = Number((raw.match(/[\d][\d\s.,]*/) || [""])[0].replace(/[\s.,]/g, ""));
     if (!amt || amt < 100 || amt > 100000000) return reply(from, s, t.badAmount);
     s.data.amount = amt; s.step = "await_rail";
-    return reply(from, s, t.askRail(amt));
-  }
-  if (s.step === "await_rail") {
-    const m = text.match(/^[1-4]$/);
-    if (!m) return reply(from, s, t.badRail);
-    const rail = RAILS[s.lang][Number(m[0]) - 1];
-    const ref = `DTP-RCT-2026-${String(rctSeq++).padStart(6, "0")} (DEMO)`;
-    s.step = "idle"; const amt = s.data.amount; s.data = {};
-    log("info", "demo receipt issued", { from, amt, rail, ref });
-    return reply(from, s, t.receipt(amt, rail, ref));
+    return replyI(from, s, list(t.railBody(amt), t.railBtn, t.railRows));
   }
 
-  // idle commands
-  if (/^(menu|bonjour|salut|hello|hi|hey|start)\b/.test(text)) { s.step = "idle"; return reply(from, s, t.menu); }
-  if (/^1$/.test(text) || /\b(pay[ée]|cotis|contribut)/.test(text)) { s.step = "await_amount"; return reply(from, s, t.askAmount); }
-  if (/^2$/.test(text) || /\b(rapport|report)\b/.test(text)) return reply(from, s, t.report);
-  if (/^3$/.test(text) || /\b(solde|balance)\b/.test(text)) return reply(from, s, t.balance);
-  if (/^4$/.test(text) || /\b(aide|help)\b/.test(text)) return reply(from, s, t.help);
-  return reply(from, s, t.fallback);
+  // legacy numeric shortcuts still work; everything routes to actions
+  if (/^(menu|bonjour|salut|hello|hi|hey|start)\b/.test(text)) { s.step = "idle"; return sendMenu(from, s); }
+  if (/^1$/.test(text) || /\b(pay[ée]|cotis|contribut)/.test(text)) return handleAction(from, s, "act_cotiser");
+  if (/^2$/.test(text) || /\b(rapport|report)\b/.test(text)) return handleAction(from, s, "act_rapport");
+  if (/^3$/.test(text) || /\b(solde|balance)\b/.test(text)) return handleAction(from, s, "m_balance");
+  if (/^4$/.test(text) || /\b(aide|help)\b/.test(text)) return handleAction(from, s, "m_help");
+  return sendMenu(from, s);
 }
 
 // ---------- graph send ----------
+async function sendInteractive(to, payload) {
+  const res = await fetch(`${GRAPH_BASE}/${PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to, type: "interactive", interactive: payload }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) { log("error", "graph interactive failed", { status: res.status, to, error: json.error?.message }); return null; }
+  log("info", "sent interactive", { to, kind: payload.type, msgId: json.messages?.[0]?.id });
+  return json.messages?.[0]?.id || null;
+}
+function btns(body, buttons, footer) {
+  return { type: "button", body: { text: body }, ...(footer ? { footer: { text: footer } } : {}),
+    action: { buttons: buttons.map(([id, title]) => ({ type: "reply", reply: { id, title: title.slice(0, 20) } })) } };
+}
+function list(body, buttonLabel, rows, footer) {
+  return { type: "list", body: { text: body }, ...(footer ? { footer: { text: footer } } : {}),
+    action: { button: buttonLabel.slice(0, 20), sections: [{ title: "Datipay", rows: rows.map(([id, title, desc]) => ({ id, title: title.slice(0, 24), ...(desc ? { description: desc.slice(0, 72) } : {}) })) }] } };
+}
 async function sendText(to, body) {
   const res = await fetch(`${GRAPH_BASE}/${PHONE_NUMBER_ID}/messages`, {
     method: "POST",
@@ -195,7 +270,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.2.0" }));
+    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.3.0" }));
   }
   if (req.method === "GET" && url.pathname === "/webhook") {
     const mode = url.searchParams.get("hub.mode");
@@ -225,5 +300,5 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end();
 });
 
-server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.2 listening on :${PORT}`));
+server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.3 listening on :${PORT}`));
 process.on("SIGTERM", () => { log("info", "SIGTERM"); server.close(() => process.exit(0)); });

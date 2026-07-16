@@ -1,6 +1,6 @@
 
 /**
- * dtp-wa-channel v0.4 — Datipay WhatsApp channel (trésorier verification loop: PENDING → CONFIRMED)
+ * dtp-wa-channel v0.5 — Datipay WhatsApp channel (USSD payment guidance + verification loop)
  * -----------------------------------------------------------------------
  * Zero-dependency Node.js (>=22). Entry point at repo root: `node index.js`.
  *
@@ -26,6 +26,8 @@ const ACCESS_TOKEN = process.env.WA_ACCESS_TOKEN || "";
 const PHONE_NUMBER_ID = process.env.WA_PHONE_NUMBER_ID || "";
 const GRAPH_BASE = process.env.WA_GRAPH_BASE || "https://graph.facebook.com/v25.0";
 const TRESORIERS = (process.env.WA_TRESORIER_NUMBERS || "").split(",").map(x => x.trim()).filter(Boolean);
+const COLLECT_MOMO = process.env.WA_COLLECT_MOMO || "670 000 001";   // demo trésorier MTN number
+const COLLECT_OM = process.env.WA_COLLECT_OM || "690 000 001";       // demo trésorier OM number
 
 function log(level, msg, extra) {
   process.stdout.write(JSON.stringify({ t: new Date().toISOString(), level, msg, ...(extra || {}) }) + "\n");
@@ -79,6 +81,10 @@ const T = {
     railBody: (amt) => `${fmtXAF(amt)} — par quelle voie ?`, railBtn: "Choisir la voie",
     railRows: [["rail_1","MTN MoMo",""],["rail_2","Orange Money",""],["rail_3","Espèces","Remis au trésorier"],["rail_4","Caisse populaire","Bordereau de dépôt"]],
     askRef: "Envoyez la référence de la transaction (ex : reçu MoMo) — ou passez.",
+    ussdMTN: (amt) => `📲 *Payez par MTN MoMo* _(DÉMO)_\n\nComposez sur votre téléphone :\n\`\`\`*126#\`\`\`\npuis suivez :\n1️⃣ Transfert d'argent\n👤 Numéro du trésorier : *${COLLECT_MOMO}*\n💰 Montant : *${fmtXAF(amt)}*\n🔐 Confirmez avec votre code PIN MoMo\n\nVous recevrez un SMS de MTN avec la *référence de transaction* — envoyez-la ici.`,
+    ussdOM: (amt) => `📲 *Payez par Orange Money* _(DÉMO)_\n\nComposez sur votre téléphone :\n\`\`\`#150#\`\`\`\npuis suivez :\n1️⃣ Transfert d'argent\n👤 Numéro du trésorier : *${COLLECT_OM}*\n💰 Montant : *${fmtXAF(amt)}*\n🔐 Confirmez avec votre code secret\n\nVous recevrez un SMS d'Orange avec la *référence* — envoyez-la ici.`,
+    cashGuide: (amt) => `🤝 *Espèces au trésorier* _(DÉMO)_\n\nRemettez *${fmtXAF(amt)}* en mains propres au trésorier.\nEnvoyez ensuite une note (ex : « remis à la réunion ») — ou passez.`,
+    cuGuide: (amt) => `🏦 *Caisse populaire* _(DÉMO)_\n\nDéposez *${fmtXAF(amt)}* sur le compte du groupe et gardez le bordereau.\nEnvoyez le numéro du bordereau — ou passez.`,
     bSkipRef: "Passer",
     pending: (amt, rub, rail, pid) => `⏳ *Déclaration reçue — en attente de vérification*\n━━━━━━━━━━━━━━━\n*DATIPAY* _(DÉMO)_\n\n*${fmtXAF(amt)}*\nRubrique : ${rub}\nVoie : ${rail}\nDossier : ${pid}\n\n*EN ATTENTE* ⏳\n━━━━━━━━━━━━━━━\n_Le trésorier a été notifié. Vous recevrez votre reçu confirmé._`,
     tresoAsk: (name, from, amt, rub, rail, refTxt, pid) => `🔔 *Vérification requise* _(DÉMO)_\n\n*${name || from}* déclare :\n*${fmtXAF(amt)}* · ${rub}\nVoie : ${rail}\nRéf : ${refTxt || "—"}\nDossier : ${pid}`,
@@ -114,6 +120,10 @@ const T = {
     railBody: (amt) => `${fmtXAF(amt)} — through which rail?`, railBtn: "Choose rail",
     railRows: [["rail_1","MTN MoMo",""],["rail_2","Orange Money",""],["rail_3","Cash","Handed to treasurer"],["rail_4","Credit union","Deposit slip"]],
     askRef: "Send the transaction reference (e.g. MoMo receipt) — or skip.",
+    ussdMTN: (amt) => `📲 *Pay with MTN MoMo* _(DEMO)_\n\nDial on your phone:\n\`\`\`*126#\`\`\`\nthen follow:\n1️⃣ Transfer money\n👤 Treasurer's number: *${COLLECT_MOMO}*\n💰 Amount: *${fmtXAF(amt)}*\n🔐 Confirm with your MoMo PIN\n\nMTN will SMS you a *transaction reference* — send it here.`,
+    ussdOM: (amt) => `📲 *Pay with Orange Money* _(DEMO)_\n\nDial on your phone:\n\`\`\`#150#\`\`\`\nthen follow:\n1️⃣ Transfer money\n👤 Treasurer's number: *${COLLECT_OM}*\n💰 Amount: *${fmtXAF(amt)}*\n🔐 Confirm with your secret code\n\nOrange will SMS you a *reference* — send it here.`,
+    cashGuide: (amt) => `🤝 *Cash to the treasurer* _(DEMO)_\n\nHand *${fmtXAF(amt)}* to the treasurer in person.\nThen send a note (e.g. "handed over at the meeting") — or skip.`,
+    cuGuide: (amt) => `🏦 *Credit union* _(DEMO)_\n\nDeposit *${fmtXAF(amt)}* to the group's account and keep the slip.\nSend the deposit-slip number — or skip.`,
     bSkipRef: "Skip",
     pending: (amt, rub, rail, pid) => `⏳ *Declaration received — awaiting verification*\n━━━━━━━━━━━━━━━\n*DATIPAY* _(DEMO)_\n\n*${fmtXAF(amt)}*\nCategory: ${rub}\nRail: ${rail}\nCase: ${pid}\n\n*PENDING* ⏳\n━━━━━━━━━━━━━━━\n_The treasurer has been notified. Your confirmed receipt will follow._`,
     tresoAsk: (name, from, amt, rub, rail, refTxt, pid) => `🔔 *Verification required* _(DEMO)_\n\n*${name || from}* declares:\n*${fmtXAF(amt)}* · ${rub}\nRail: ${rail}\nRef: ${refTxt || "—"}\nCase: ${pid}`,
@@ -178,8 +188,11 @@ async function handleAction(from, s, id) {
     case id === "amt_other": s.step = "await_amount_text"; return reply(from, s, t.askAmount);
     case id.startsWith("rail_"): {
       if (!s.data.amount) { s.step = "idle"; return sendMenu(from, s); }
-      s.data.rail = RAILS[s.lang][Number(id.split("_")[1]) - 1];
+      const railIdx = Number(id.split("_")[1]);
+      s.data.rail = RAILS[s.lang][railIdx - 1];
       s.step = "await_ref";
+      const guides = [t.ussdMTN, t.ussdOM, t.cashGuide, t.cuGuide];
+      await reply(from, s, guides[railIdx - 1](s.data.amount));
       return replyI(from, s, btns(t.askRef, [["ref_skip", t.bSkipRef]]));
     }
     case id === "ref_skip": {
@@ -345,7 +358,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.4.0" }));
+    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.5.0" }));
   }
   if (req.method === "GET" && url.pathname === "/webhook") {
     const mode = url.searchParams.get("hub.mode");
@@ -375,5 +388,5 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end();
 });
 
-server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.4 listening on :${PORT}`));
+server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.5 listening on :${PORT}`));
 process.on("SIGTERM", () => { log("info", "SIGTERM"); server.close(() => process.exit(0)); });

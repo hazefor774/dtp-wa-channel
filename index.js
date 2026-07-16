@@ -1,6 +1,6 @@
 
 /**
- * dtp-wa-channel v0.3 — Datipay WhatsApp channel (interactive DEMO: buttons, lists, rubriques)
+ * dtp-wa-channel v0.4 — Datipay WhatsApp channel (trésorier verification loop: PENDING → CONFIRMED)
  * -----------------------------------------------------------------------
  * Zero-dependency Node.js (>=22). Entry point at repo root: `node index.js`.
  *
@@ -25,6 +25,7 @@ const APP_SECRET = process.env.WA_APP_SECRET || "";
 const ACCESS_TOKEN = process.env.WA_ACCESS_TOKEN || "";
 const PHONE_NUMBER_ID = process.env.WA_PHONE_NUMBER_ID || "";
 const GRAPH_BASE = process.env.WA_GRAPH_BASE || "https://graph.facebook.com/v25.0";
+const TRESORIERS = (process.env.WA_TRESORIER_NUMBERS || "").split(",").map(x => x.trim()).filter(Boolean);
 
 function log(level, msg, extra) {
   process.stdout.write(JSON.stringify({ t: new Date().toISOString(), level, msg, ...(extra || {}) }) + "\n");
@@ -58,6 +59,8 @@ function session(from) {
 
 // ---------- demo receipt counter ----------
 let rctSeq = 124; // continues the story the website started (…000123)
+let pendSeq = 1;
+const pendings = new Map(); // pid -> {from, name, amt, rub, rail, refTxt, ref, at}
 const fmtXAF = (n) => Number(n).toLocaleString("fr-FR").replace(/\u202f|\u00a0/g, " ") + " XAF";
 
 // ---------- copy (FR primary, EN mirror) ----------
@@ -75,12 +78,22 @@ const T = {
     bAmtExpected: "25 000 (attendu)", bAmtOther: "Autre montant",
     railBody: (amt) => `${fmtXAF(amt)} — par quelle voie ?`, railBtn: "Choisir la voie",
     railRows: [["rail_1","MTN MoMo",""],["rail_2","Orange Money",""],["rail_3","Espèces","Remis au trésorier"],["rail_4","Caisse populaire","Bordereau de dépôt"]],
+    askRef: "Envoyez la référence de la transaction (ex : reçu MoMo) — ou passez.",
+    bSkipRef: "Passer",
+    pending: (amt, rub, rail, pid) => `⏳ *Déclaration reçue — en attente de vérification*\n━━━━━━━━━━━━━━━\n*DATIPAY* _(DÉMO)_\n\n*${fmtXAF(amt)}*\nRubrique : ${rub}\nVoie : ${rail}\nDossier : ${pid}\n\n*EN ATTENTE* ⏳\n━━━━━━━━━━━━━━━\n_Le trésorier a été notifié. Vous recevrez votre reçu confirmé._`,
+    tresoAsk: (name, from, amt, rub, rail, refTxt, pid) => `🔔 *Vérification requise* _(DÉMO)_\n\n*${name || from}* déclare :\n*${fmtXAF(amt)}* · ${rub}\nVoie : ${rail}\nRéf : ${refTxt || "—"}\nDossier : ${pid}`,
+    bConfirm: "✅ Confirmer", bReject: "❌ Rejeter",
+    confirmedByTreso: "Vérifié par le trésorier",
+    rejected: (pid) => `❌ Votre déclaration ${pid} n'a pas été confirmée par le trésorier. Contactez votre bureau ou réessayez (*MENU*).`,
+    tresoDone: (pid) => `Dossier ${pid} confirmé ✔ — reçu envoyé au membre.`,
+    tresoRejDone: (pid) => `Dossier ${pid} rejeté — le membre a été notifié.`,
+    noTreso: "_(Mode démo sans trésorier configuré — confirmation automatique.)_",
     askAmount: "Quel montant avez-vous payé ?\n_(exemple : 25000)_",
     badAmount: "Je n'ai pas compris le montant. Envoyez seulement les chiffres, ex : *25000*",
     askRail: (amt) => `${fmtXAF(amt)} — par quelle voie ?\n\n1️⃣ MTN MoMo\n2️⃣ Orange Money\n3️⃣ Espèces (au trésorier)\n4️⃣ Caisse populaire`,
     badRail: "Répondez 1, 2, 3 ou 4 pour choisir la voie de paiement.",
-    receipt: (amt, rub, rail, ref) =>
-      `✅ *Vérifié et enregistré — merci !*\n━━━━━━━━━━━━━━━\n*DATIPAY REÇU* _(DÉMO)_\n\n*${fmtXAF(amt)}*\n\nMembre : DTP-MBR-2026-0012\nRubrique : ${rub}\nVoie : ${rail}\nRéf : ${ref}\nCycle 4 · 13/18 payés\n\n*CONFIRMÉ* ✔\n━━━━━━━━━━━━━━━\n_Reçu partagé avec le bureau. Répondez MENU pour continuer._`,
+    receipt: (amt, rub, rail, ref, by) =>
+      `✅ *Vérifié et enregistré — merci !*\n━━━━━━━━━━━━━━━\n*DATIPAY REÇU* _(DÉMO)_\n\n*${fmtXAF(amt)}*\n\nMembre : DTP-MBR-2026-0012\nRubrique : ${rub}\nVoie : ${rail}\nRéf : ${ref}\nCycle 4 · 13/18 payés\n\n*CONFIRMÉ* ✔ · ${by}\n━━━━━━━━━━━━━━━\n_Reçu partagé avec le bureau. Répondez MENU pour continuer._`,
     report: "📊 *Rapport — Njangi « Unité Bamenda »* _(DÉMO)_\nCycle 4 · bénéficiaire : Membre 07\n\nCotisations : *13/18 payées*\nCaisse du cycle : *325 000 XAF*\nAmendes en attente : 2 (4 000 XAF)\nCollecte solidarité (deuil) : 86 000 XAF\n\nEn retard : M-03, M-09, M-11, M-14, M-16\n_Rappels envoyés automatiquement hier à 18h._\n\nRépondez MENU pour continuer.",
     balance: "👤 *Votre situation* _(DÉMO)_\nMembre : DTP-MBR-2026-0012\n\nCycle 4 : *payé* ✔ (25 000 XAF)\nAmendes : aucune\nSolidarité versée : 5 000 XAF\nVotre tour de ramassage : cycle 7\n\nRépondez MENU pour continuer.",
     help: "ℹ️ *Aide Datipay*\nDatipay tient le registre de votre groupe sur WhatsApp : reçus numérotés, rappels, rapports.\nDatipay n'est pas une banque et ne détient pas votre argent.\n\nCommandes : *MENU* · *1* cotisation · *2* rapport · *3* solde · *STOP*\nFor English, reply *EN*.",
@@ -100,12 +113,22 @@ const T = {
     bAmtExpected: "25,000 (expected)", bAmtOther: "Other amount",
     railBody: (amt) => `${fmtXAF(amt)} — through which rail?`, railBtn: "Choose rail",
     railRows: [["rail_1","MTN MoMo",""],["rail_2","Orange Money",""],["rail_3","Cash","Handed to treasurer"],["rail_4","Credit union","Deposit slip"]],
+    askRef: "Send the transaction reference (e.g. MoMo receipt) — or skip.",
+    bSkipRef: "Skip",
+    pending: (amt, rub, rail, pid) => `⏳ *Declaration received — awaiting verification*\n━━━━━━━━━━━━━━━\n*DATIPAY* _(DEMO)_\n\n*${fmtXAF(amt)}*\nCategory: ${rub}\nRail: ${rail}\nCase: ${pid}\n\n*PENDING* ⏳\n━━━━━━━━━━━━━━━\n_The treasurer has been notified. Your confirmed receipt will follow._`,
+    tresoAsk: (name, from, amt, rub, rail, refTxt, pid) => `🔔 *Verification required* _(DEMO)_\n\n*${name || from}* declares:\n*${fmtXAF(amt)}* · ${rub}\nRail: ${rail}\nRef: ${refTxt || "—"}\nCase: ${pid}`,
+    bConfirm: "✅ Confirm", bReject: "❌ Reject",
+    confirmedByTreso: "Verified by the treasurer",
+    rejected: (pid) => `❌ Your declaration ${pid} was not confirmed by the treasurer. Contact your bureau or try again (*MENU*).`,
+    tresoDone: (pid) => `Case ${pid} confirmed ✔ — receipt sent to the member.`,
+    tresoRejDone: (pid) => `Case ${pid} rejected — the member has been notified.`,
+    noTreso: "_(Demo mode without a configured treasurer — auto-confirmed.)_",
     askAmount: "How much did you pay?\n_(example: 25000)_",
     badAmount: "I didn't catch the amount. Send digits only, e.g. *25000*",
     askRail: (amt) => `${fmtXAF(amt)} — through which rail?\n\n1️⃣ MTN MoMo\n2️⃣ Orange Money\n3️⃣ Cash (to treasurer)\n4️⃣ Credit union`,
     badRail: "Reply 1, 2, 3 or 4 to choose the payment rail.",
-    receipt: (amt, rub, rail, ref) =>
-      `✅ *Verified and recorded — thank you!*\n━━━━━━━━━━━━━━━\n*DATIPAY RECEIPT* _(DEMO)_\n\n*${fmtXAF(amt)}*\n\nMember: DTP-MBR-2026-0012\nCategory: ${rub}\nRail: ${rail}\nRef: ${ref}\nCycle 4 · 13/18 paid\n\n*CONFIRMED* ✔\n━━━━━━━━━━━━━━━\n_Receipt shared with the bureau. Reply MENU to continue._`,
+    receipt: (amt, rub, rail, ref, by) =>
+      `✅ *Verified and recorded — thank you!*\n━━━━━━━━━━━━━━━\n*DATIPAY RECEIPT* _(DEMO)_\n\n*${fmtXAF(amt)}*\n\nMember: DTP-MBR-2026-0012\nCategory: ${rub}\nRail: ${rail}\nRef: ${ref}\nCycle 4 · 13/18 paid\n\n*CONFIRMED* ✔ · ${by}\n━━━━━━━━━━━━━━━\n_Receipt shared with the bureau. Reply MENU to continue._`,
     report: "📊 *Report — Njangi \"Unité Bamenda\"* _(DEMO)_\nCycle 4 · beneficiary: Member 07\n\nContributions: *13/18 paid*\nCycle pot: *325,000 XAF*\nPending fines: 2 (4,000 XAF)\nSolidarity collection (bereavement): 86,000 XAF\n\nLate: M-03, M-09, M-11, M-14, M-16\n_Reminders sent automatically yesterday 6pm._\n\nReply MENU to continue.",
     balance: "👤 *Your standing* _(DEMO)_\nMember: DTP-MBR-2026-0012\n\nCycle 4: *paid* ✔ (25,000 XAF)\nFines: none\nSolidarity given: 5,000 XAF\nYour payout turn: cycle 7\n\nReply MENU to continue.",
     help: "ℹ️ *Datipay help*\nDatipay keeps your group's record on WhatsApp: numbered receipts, reminders, reports.\nDatipay is not a bank and does not hold your money.\n\nCommands: *MENU* · *1* contribute · *2* report · *3* balance · *STOP*\nPour le français, répondez *FR*.",
@@ -155,21 +178,70 @@ async function handleAction(from, s, id) {
     case id === "amt_other": s.step = "await_amount_text"; return reply(from, s, t.askAmount);
     case id.startsWith("rail_"): {
       if (!s.data.amount) { s.step = "idle"; return sendMenu(from, s); }
-      const rail = RAILS[s.lang][Number(id.split("_")[1]) - 1];
-      const ref = `DTP-RCT-2026-${String(rctSeq++).padStart(6, "0")} (DEMO)`;
-      const amt = s.data.amount; const rub = s.data.rub || RUB.rub_cot[s.lang];
-      s.step = "idle"; s.data = {};
-      log("info", "demo receipt issued", { from, amt, rub, rail, ref });
-      return reply(from, s, t.receipt(amt, rub, rail, ref));
+      s.data.rail = RAILS[s.lang][Number(id.split("_")[1]) - 1];
+      s.step = "await_ref";
+      return replyI(from, s, btns(t.askRef, [["ref_skip", t.bSkipRef]]));
+    }
+    case id === "ref_skip": {
+      if (s.step !== "await_ref") return sendMenu(from, s);
+      return submitDeclaration(from, s, null);
+    }
+    case id.startsWith("conf_") || id.startsWith("rej_"): {
+      return handleTresorier(from, s, id);
     }
     default: return sendMenu(from, s);
   }
+}
+
+async function submitDeclaration(from, s, refTxt) {
+  const t = T[s.lang];
+  const amt = s.data.amount, rub = s.data.rub || RUB.rub_cot[s.lang], rail = s.data.rail;
+  s.step = "idle"; s.data = {};
+  if (!amt || !rail) return sendMenu(from, s);
+  const pid = `DTP-PND-${String(pendSeq++).padStart(4, "0")}`;
+  const rec = { from, name: s.name || from, amt, rub, rail, refTxt, lang: s.lang, at: Date.now() };
+  if (!TRESORIERS.length) {
+    // honest demo fallback: label the auto-confirmation as such
+    const ref = `DTP-RCT-2026-${String(rctSeq++).padStart(6, "0")} (DEMO)`;
+    log("info", "receipt auto-confirmed (no tresorier configured)", { from, amt, rub, rail, ref });
+    await reply(from, s, t.receipt(amt, rub, rail, ref, "AUTO"));
+    return reply(from, s, t.noTreso);
+  }
+  pendings.set(pid, rec);
+  log("info", "declaration pending", { pid, from, amt, rub, rail, refTxt });
+  await reply(from, s, t.pending(amt, rub, rail, pid));
+  for (const tres of TRESORIERS) {
+    const tt = T[s.lang];
+    await sendInteractive(tres, btns(tt.tresoAsk(rec.name, from, amt, rub, rail, refTxt, pid),
+      [[`conf_${pid}`, tt.bConfirm], [`rej_${pid}`, tt.bReject]])).catch((e) => log("error", "treso notify failed", { err: String(e) }));
+  }
+}
+
+async function handleTresorier(from, s, id) {
+  const isConfirm = id.startsWith("conf_");
+  const pid = id.slice(isConfirm ? 5 : 4);
+  const rec = pendings.get(pid);
+  const t = T[s.lang];
+  if (!TRESORIERS.includes(from)) { log("warn", "non-tresorier tapped verify button", { from, id }); return; }
+  if (!rec) return reply(from, s, s.lang === "fr" ? `Dossier ${pid} introuvable ou déjà traité.` : `Case ${pid} not found or already handled.`);
+  pendings.delete(pid);
+  const mt = T[rec.lang];
+  if (isConfirm) {
+    const ref = `DTP-RCT-2026-${String(rctSeq++).padStart(6, "0")} (DEMO)`;
+    log("info", "declaration CONFIRMED by tresorier", { pid, by: from, ref });
+    await sendText(rec.from, mt.receipt(rec.amt, rec.rub, rec.rail, ref, mt.confirmedByTreso)).catch(() => {});
+    return reply(from, s, t.tresoDone(pid));
+  }
+  log("info", "declaration REJECTED by tresorier", { pid, by: from });
+  await sendText(rec.from, mt.rejected(pid)).catch(() => {});
+  return reply(from, s, t.tresoRejDone(pid));
 }
 
 async function handleMessage(msg, contactName) {
   const from = msg.from;
   const s = session(from);
   // interactive replies (button/list taps)
+  if (contactName) s.name = contactName;
   if (msg.type === "interactive") {
     const id = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id;
     log("info", "inbound tap", { from, name: contactName, id, step: s.step });
@@ -194,6 +266,9 @@ async function handleMessage(msg, contactName) {
   }
   if (/^(en|english|fr|français|francais)$/i.test(text)) { s.step = "idle"; return sendMenu(from, s); }
 
+  if (s.step === "await_ref") {
+    return submitDeclaration(from, s, raw.slice(0, 60));
+  }
   if (s.step === "await_amount_text" || s.step === "await_amount") {
     const amt = Number((raw.match(/[\d][\d\s.,]*/) || [""])[0].replace(/[\s.,]/g, ""));
     if (!amt || amt < 100 || amt > 100000000) return reply(from, s, t.badAmount);
@@ -270,7 +345,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.3.0" }));
+    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.4.0" }));
   }
   if (req.method === "GET" && url.pathname === "/webhook") {
     const mode = url.searchParams.get("hub.mode");
@@ -300,5 +375,5 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end();
 });
 
-server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.3 listening on :${PORT}`));
+server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.4 listening on :${PORT}`));
 process.on("SIGTERM", () => { log("info", "SIGTERM"); server.close(() => process.exit(0)); });

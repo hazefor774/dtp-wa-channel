@@ -276,6 +276,7 @@ async function handleAction(from, s, id) {
     }
     case id === "ob_keepname": { const p=prof(from); p.name = s.name || "Membre"; s.step="ob_ville"; return reply(from, s, s.lang==="fr"?"Votre ville / quartier ?":"Your city / neighborhood?"); }
     case id === "ob_typename": { s.step="ob_name_type"; return reply(from, s, s.lang==="fr"?"Tapez votre nom d'affichage :":"Type your display name:"); }
+    case id.startsWith("obsp_"): { return sendSealPage(from, s, Number(id.slice(5)) || 0); }
     case id.startsWith("obsi_"): { s.data.sealIcon = id.slice(5); s.step="ob_seal_word"; return reply(from, s, s.lang==="fr"?`Icône : ${s.data.sealIcon}. Maintenant votre *mot secret* (jamais partagé) :`:`Icon: ${s.data.sealIcon}. Now your *secret word* (never shared):`); }
     case id === "ob_consent_yes": { const p=prof(from); p.consentAt=Date.now(); s.step="idle"; auditLog(from,"CONSENT","self",{});
       await reply(from, s, s.lang==="fr"?`🪪 Profil créé — ${p.name||""} · ${p.ville||""}\nSceau : • ${p.seal} •\nVos actions sensibles exigeront votre PIN.`:`🪪 Profile created — ${p.name||""} · ${p.ville||""}\nSeal: • ${p.seal} •\nSensitive actions will require your PIN.`);
@@ -340,6 +341,16 @@ async function handleTresorier(from, s, id) {
   return reply(from, s, t.tresoRejDone(pid));
 }
 
+async function sendSealPage(from, s, page) {
+  const fr = s.lang === "fr";
+  const per = 9;
+  const slice = SEAL_ICONS.slice(page * per, page * per + per);
+  const rows = slice.map((n) => ({ id: "obsi_" + n, title: n }));
+  if ((page + 1) * per < SEAL_ICONS.length) rows.push({ id: "obsp_" + (page + 1), title: fr ? "➡️ Plus d'icônes" : "➡️ More icons" });
+  return replyI(from, s, { type: "list", body: { text: fr ? `Choisissez votre *icône de sceau* (${page + 1}/${Math.ceil(SEAL_ICONS.length / per)}) — anti-fraude, elle apparaîtra sur vos cartes.` : `Choose your *seal icon* (${page + 1}/${Math.ceil(SEAL_ICONS.length / per)}) — anti-fraud, it will appear on your cards.` },
+    action: { button: fr ? "Choisir" : "Choose", sections: [{ title: "Datipay", rows }] } });
+}
+
 async function onboarding(from, s, p, raw, text, contactName) {
   const fr = s.lang === "fr";
   switch (s.step) {
@@ -355,9 +366,7 @@ async function onboarding(from, s, p, raw, text, contactName) {
       s.data.pin1 = pin; s.step = "ob_pin2"; return reply(from, s, fr ? "Confirmez le PIN." : "Confirm the PIN."); }
     case "ob_pin2": { const pin = raw.replace(/\D/g, ""); if (pin !== s.data.pin1) { s.step = "ob_pin"; s.data = {}; return reply(from, s, fr ? "Les PIN ne correspondent pas — recommencez." : "PINs don't match — try again."); }
       setPin(p, pin); s.data = {}; s.step = "ob_seal_icon"; auditLog(from, "PIN_SET", "self", {});
-      const rows1 = SEAL_ICONS.slice(0, 10).map((n) => ["obsi_" + n, n, ""]);
-      return replyI(from, s, { type: "list", body: { text: fr ? "Choisissez votre *icône de sceau* (anti-fraude — elle apparaîtra sur vos cartes)." : "Choose your *seal icon* (anti-fraud — it will appear on your cards)." },
-        action: { button: fr ? "Choisir l'icône" : "Choose icon", sections: [ { title: "1/2", rows: rows1.map(([id, ti]) => ({ id, title: ti })) }, { title: "2/2", rows: SEAL_ICONS.slice(10).map((n) => ({ id: "obsi_" + n, title: n })) } ] } }); }
+      return sendSealPage(from, s, 0); }
     case "ob_seal_word": { const w = raw.trim().slice(0, 20); if (w.length < 2) return reply(from, s, fr ? "Un mot d'au moins 2 lettres." : "A word of at least 2 letters.");
       s.seal = (s.data.sealIcon || "KOLA").toUpperCase() + " + " + w.toUpperCase(); p.seal = s.seal; s.data = {}; s.step = "ob_consent";
       return replyI(from, s, btns(fr ? `Sceau : • ${s.seal} •\n\nDatipay est un service de registre (pas une banque). Vos données servent uniquement au fonctionnement du service. Politique : datipay.com/privacy` : `Seal: • ${s.seal} •\n\nDatipay is a record-keeping service (not a bank). Your data is used only to run the service. Policy: datipay.com/privacy`, [["ob_consent_yes", fr ? "✅ J'accepte" : "✅ I agree"]])); }
@@ -426,7 +435,7 @@ async function handleMessage(msg, contactName) {
   }
   const raw = (msg.text?.body ?? "").trim();
   const text = raw.toLowerCase();
-  log("info", "inbound text", { from, name: contactName, text: raw, step: s.step });
+  log("info", "inbound text", { from, name: contactName, text: (s.step && (s.step.includes("pin") || s.step === "await_pin")) ? "***" : raw, step: s.step });
 
   s.lang = detectLang(raw, s);
   const t = T[s.lang];
@@ -622,7 +631,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.9.0" }));
+    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.9.1" }));
   }
   if (req.method === "GET" && url.pathname === "/webhook") {
     const mode = url.searchParams.get("hub.mode");
@@ -652,5 +661,5 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end();
 });
 
-server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.9 listening on :${PORT}`));
+server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.9.1 listening on :${PORT}`));
 process.on("SIGTERM", () => { log("info", "SIGTERM"); server.close(() => process.exit(0)); });

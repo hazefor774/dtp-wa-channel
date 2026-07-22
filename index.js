@@ -32,7 +32,9 @@ const PAY_BASE = process.env.DTP_PAY_BASE || "";                       // NsengN
 const PAY_TOKEN = process.env.DTP_PAY_TOKEN || "";
 const PAY_SIM_MS = Number(process.env.DTP_PAY_SIM_MS || 6000);
 const RENDER_BASE = process.env.DTP_RENDER_BASE || "http://dtp-render.datipay.svc.cluster.local";
-const ONBOARD_FLOW_ID = process.env.WA_ONBOARD_FLOW_ID || "1733917141204702";
+const FLOW_FR = process.env.WA_ONBOARD_FLOW_ID || "1733917141204702";
+const FLOW_EN = process.env.WA_ONBOARD_FLOW_ID_EN || FLOW_FR;
+const flowFor = (lang) => (lang === "en" ? FLOW_EN : FLOW_FR);
 const OFFICIAL_NUMBER = process.env.WA_OFFICIAL_NUMBER || "+1 (555) 181-1569";
 const PRESIDENTS = (process.env.WA_PRESIDENT_NUMBERS || "").split(",").map(x=>x.trim()).filter(Boolean);
 const roles = { president: new Set(PRESIDENTS), tresorier: new Set(TRESORIERS) };
@@ -392,15 +394,14 @@ async function onboarding(from, s, p, raw, text, contactName) {
       if (/^onboard chat$/i.test(text)) { s.step = "ob_name";
         return replyI(from, s, btns(fr ? `Votre nom d'affichage : *${contactName || "?"}* — le garder ?` : `Your display name: *${contactName || "?"}* — keep it?`, [["ob_keepname", fr ? "✅ Garder" : "✅ Keep"], ["ob_typename", fr ? "✏️ Autre nom" : "✏️ Other name"]])); }
       s.step = "ob_flow";
-      await reply(from, s, fr ? "👋 Bienvenue chez Datipay." : "👋 Welcome to Datipay.");
-      return sendFlow(from, ONBOARD_FLOW_ID,
+      return sendFlow(from, flowFor(s.lang),
         fr ? "Créez votre profil en 60 secondes — formulaire sécurisé, rien ne s'affiche dans la conversation." : "Create your profile in 60 seconds — secure form, nothing appears in the chat.",
         fr ? "📋 Créer mon profil" : "📋 Create my profile");
     }
     case "ob_flow": {
       if (/^onboard chat$/i.test(text)) { s.step = "ob_name";
         return replyI(from, s, btns(fr ? `Votre nom d'affichage : *${contactName || "?"}* — le garder ?` : `Your display name: *${contactName || "?"}* — keep it?`, [["ob_keepname", "✅"], ["ob_typename", "✏️"]])); }
-      return sendFlow(from, ONBOARD_FLOW_ID,
+      return sendFlow(from, flowFor(s.lang),
         fr ? "Touchez le bouton pour ouvrir le formulaire sécurisé (ou envoyez « onboard chat » pour la version texte)." : "Tap the button to open the secure form (or send \"onboard chat\" for the text version).",
         fr ? "📋 Créer mon profil" : "📋 Create my profile");
     }
@@ -468,6 +469,13 @@ async function handleMessage(msg, contactName) {
   // interactive replies (button/list taps)
   if (contactName) s.name = contactName;
   if (msg.type === "interactive") {
+    if (msg.interactive?.type === "nfm_reply") {
+      log("info", "flow response received", { from, step: s.step });
+      try {
+        const r = JSON.parse(msg.interactive.nfm_reply.response_json || "{}");
+        return await handleFlowReply(from, contactName, r);
+      } catch (e) { log("error", "nfm parse failed", { err: String(e) }); return; }
+    }
     const id = msg.interactive?.button_reply?.id || msg.interactive?.list_reply?.id;
     log("info", "inbound tap", { from, name: contactName, id, step: s.step });
     if (!id) return;
@@ -676,7 +684,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.10.0" }));
+    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.10.2" }));
   }
   if (req.method === "GET" && url.pathname === "/webhook") {
     const mode = url.searchParams.get("hub.mode");

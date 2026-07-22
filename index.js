@@ -1,5 +1,5 @@
 /**
- * dtp-wa-channel v0.9 — Datipay WhatsApp channel (onboarding U0 · PIN auth · RBAC · dual-signature payouts)
+ * dtp-wa-channel v0.10 — Datipay WhatsApp channel (Flow-based encrypted onboarding · RBAC · dual-signature payouts)
  * -----------------------------------------------------------------------
  * Zero-dependency Node.js (>=22). Entry point at repo root: `node index.js`.
  *
@@ -32,6 +32,7 @@ const PAY_BASE = process.env.DTP_PAY_BASE || "";                       // NsengN
 const PAY_TOKEN = process.env.DTP_PAY_TOKEN || "";
 const PAY_SIM_MS = Number(process.env.DTP_PAY_SIM_MS || 6000);
 const RENDER_BASE = process.env.DTP_RENDER_BASE || "http://dtp-render.datipay.svc.cluster.local";
+const ONBOARD_FLOW_ID = process.env.WA_ONBOARD_FLOW_ID || "1733917141204702";
 const OFFICIAL_NUMBER = process.env.WA_OFFICIAL_NUMBER || "+1 (555) 181-1569";
 const PRESIDENTS = (process.env.WA_PRESIDENT_NUMBERS || "").split(",").map(x=>x.trim()).filter(Boolean);
 const roles = { president: new Set(PRESIDENTS), tresorier: new Set(TRESORIERS) };
@@ -341,6 +342,39 @@ async function handleTresorier(from, s, id) {
   return reply(from, s, t.tresoRejDone(pid));
 }
 
+async function handleFlowReply(from, contactName, r) {
+  const s = sess(from); const p = prof(from); const fr = s.lang === "fr";
+  const pin = String(r.pin || "").replace(/\D/g, "");
+  if (!/^\d{4,6}$/.test(pin) || pin !== String(r.pin_confirm || "").replace(/\D/g, "")) {
+    return reply(from, s, fr ? "Les PIN ne correspondent pas — rouvrez le formulaire." : "PINs don't match — reopen the form.");
+  }
+  p.name = String(r.display_name || contactName || "Membre").slice(0, 40);
+  p.ville = String(r.ville || "").slice(0, 40);
+  setPin(p, pin);
+  p.seal = String(r.seal_icon || "KOLA").toUpperCase() + " + " + String(r.seal_word || "").toUpperCase().slice(0, 20);
+  s.seal = p.seal;
+  p.consentAt = Date.now();
+  s.step = "idle";
+  auditLog(from, "ONBOARDED_VIA_FLOW", "self", {});
+  await reply(from, s, fr
+    ? `🪪 Profil créé — ${p.name} · ${p.ville}\nSceau : • ${p.seal} •\nVos actions sensibles exigeront votre PIN.`
+    : `🪪 Profile created — ${p.name} · ${p.ville}\nSeal: • ${p.seal} •\nSensitive actions will require your PIN.`);
+  return sendMenu(from, s);
+}
+
+async function sendFlow(to, flowId, bodyText, cta) {
+  const payload = { messaging_product: "whatsapp", recipient_type: "individual", to, type: "interactive",
+    interactive: { type: "flow", body: { text: bodyText },
+      action: { name: "flow", parameters: { flow_message_version: "3", flow_id: flowId, flow_cta: cta,
+        flow_token: "dtp-" + crypto.randomBytes(6).toString("hex"), mode: "published" } } } };
+  const res = await fetch(`${GRAPH_BASE}/${PHONE_NUMBER_ID}/messages`, { method: "POST",
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) log("error", "flow send failed", { status: res.status, error: j.error?.message });
+  else log("info", "flow sent", { to, flowId, msgId: j.messages?.[0]?.id });
+  return res.ok;
+}
+
 async function sendSealPage(from, s, page) {
   const fr = s.lang === "fr";
   const per = 9;
@@ -355,9 +389,20 @@ async function onboarding(from, s, p, raw, text, contactName) {
   const fr = s.lang === "fr";
   switch (s.step) {
     case "idle": case "ob_start": default: {
-      s.step = "ob_name";
-      await reply(from, s, fr ? "👋 Bienvenue chez Datipay — créons votre profil en 60 secondes." : "👋 Welcome to Datipay — let's create your profile in 60 seconds.");
-      return replyI(from, s, btns(fr ? `Votre nom d'affichage : *${contactName || "?"}* — le garder ?` : `Your display name: *${contactName || "?"}* — keep it?`, [["ob_keepname", fr ? "✅ Garder" : "✅ Keep"], ["ob_typename", fr ? "✏️ Autre nom" : "✏️ Other name"]]));
+      if (/^onboard chat$/i.test(text)) { s.step = "ob_name";
+        return replyI(from, s, btns(fr ? `Votre nom d'affichage : *${contactName || "?"}* — le garder ?` : `Your display name: *${contactName || "?"}* — keep it?`, [["ob_keepname", fr ? "✅ Garder" : "✅ Keep"], ["ob_typename", fr ? "✏️ Autre nom" : "✏️ Other name"]])); }
+      s.step = "ob_flow";
+      await reply(from, s, fr ? "👋 Bienvenue chez Datipay." : "👋 Welcome to Datipay.");
+      return sendFlow(from, ONBOARD_FLOW_ID,
+        fr ? "Créez votre profil en 60 secondes — formulaire sécurisé, rien ne s'affiche dans la conversation." : "Create your profile in 60 seconds — secure form, nothing appears in the chat.",
+        fr ? "📋 Créer mon profil" : "📋 Create my profile");
+    }
+    case "ob_flow": {
+      if (/^onboard chat$/i.test(text)) { s.step = "ob_name";
+        return replyI(from, s, btns(fr ? `Votre nom d'affichage : *${contactName || "?"}* — le garder ?` : `Your display name: *${contactName || "?"}* — keep it?`, [["ob_keepname", "✅"], ["ob_typename", "✏️"]])); }
+      return sendFlow(from, ONBOARD_FLOW_ID,
+        fr ? "Touchez le bouton pour ouvrir le formulaire sécurisé (ou envoyez « onboard chat » pour la version texte)." : "Tap the button to open the secure form (or send \"onboard chat\" for the text version).",
+        fr ? "📋 Créer mon profil" : "📋 Create my profile");
     }
     case "ob_name_type": p.name = raw.slice(0, 40); s.step = "ob_ville"; return reply(from, s, fr ? "Votre ville / quartier ?" : "Your city / neighborhood?");
     case "ob_ville": p.ville = raw.slice(0, 40); s.step = "ob_pin";
@@ -631,7 +676,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.9.1" }));
+    return res.end(JSON.stringify({ ok: true, service: "dtp-wa-channel", v: "0.10.0" }));
   }
   if (req.method === "GET" && url.pathname === "/webhook") {
     const mode = url.searchParams.get("hub.mode");
@@ -661,5 +706,5 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end();
 });
 
-server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.9.1 listening on :${PORT}`));
+server.listen(PORT, "0.0.0.0", () => log("info", `dtp-wa-channel v0.10 listening on :${PORT}`));
 process.on("SIGTERM", () => { log("info", "SIGTERM"); server.close(() => process.exit(0)); });
